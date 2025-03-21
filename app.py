@@ -1,55 +1,40 @@
-import joblib
 from flask import Flask, request, jsonify
+import joblib
+import numpy as np
 import pandas as pd
-import os
-
-# Tải mô hình đã huấn luyện
-try:
-    model = joblib.load('LinearRegression_model.pkl')
-    print("Model loaded successfully")
-except Exception as e:
-    print(f"Error loading model: {e}")
-    exit(1)
+from sklearn.impute import SimpleImputer
 
 app = Flask(__name__)
 
-@app.route('/predict', methods=['GET', 'POST'])
+# Load mô hình đã lưu
+model = joblib.load('LinearRegression_model.pkl')
+
+# Hàm xử lý dữ liệu đầu vào
+def preprocess_input(data):
+    df = pd.DataFrame([data])
+    
+    # Chuyển đổi kiểu dữ liệu tương tự như khi huấn luyện
+    df['DayOn'] = df['DayOn'].astype(int)
+    df['Qoil'] = pd.to_numeric(df['Qoil'], errors='coerce')
+    df['GOR'] = pd.to_numeric(df['GOR'], errors='coerce')
+    df['Press_WH'] = pd.to_numeric(df['Press_WH'], errors='coerce')
+    df['LiqRate'] = pd.to_numeric(df['LiqRate'], errors='coerce')
+    
+    # Điền giá trị thiếu
+    imputer = SimpleImputer(strategy='mean')
+    df_imputed = imputer.fit_transform(df)
+    
+    return df_imputed
+
+@app.route('/predict', methods=['POST'])
 def predict():
     try:
-        if request.method == 'POST':
-            data = request.get_json(force=True)
-        else:  # Nếu là GET, lấy dữ liệu từ query parameters
-            data = request.args.to_dict()
-
-        if not data:
-            return jsonify({'error': 'No input data provided'}), 400
-
-        # Kiểm tra và ép kiểu dữ liệu
-        required_columns = ['DayOn', 'Qoil', 'GOR', 'Press_WH', 'LiqRate']  # Thay đổi theo các cột mà mô hình yêu cầu
-        for column in required_columns:
-            if column not in data:
-                return jsonify({'error': f'Missing required input: {column}'}), 400
-
-        try:
-            # Chuyển đổi dữ liệu thành float
-            data = {key: float(value) for key, value in data.items() if value is not None and value != ""}
-        except ValueError:
-            return jsonify({'error': 'Invalid input format. All values must be numeric'}), 400
-
-        print("📥 Dữ liệu nhận được:", data)  # Debugging
-
-        # Chuyển đổi dữ liệu thành DataFrame
-        input_data = pd.DataFrame([data])
-
-        # Thực hiện dự đoán
-        prediction = model.predict(input_data)
-
-        return jsonify({'Predicted_Oilrate': prediction[0]})
+        data = request.get_json()
+        processed_data = preprocess_input(data)
+        prediction = model.predict(processed_data)
+        return jsonify({'predicted_oilrate': prediction.tolist()})
     except Exception as e:
-        print("Lỗi:", str(e))  # Debugging
-        return jsonify({'error': str(e)}), 400
+        return jsonify({'error': str(e)})
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))  # Render cung cấp biến PORT
-    print(f"Running on port {port}")  # Debug
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000)

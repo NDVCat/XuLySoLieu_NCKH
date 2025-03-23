@@ -5,3 +5,4 @@ numpy
 pydantic
 scikit-learn
 gunicorn
+Flask

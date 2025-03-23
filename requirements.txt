@@ -4,3 +4,4 @@ joblib
 numpy
 pydantic
 scikit-learn
+gunicorn

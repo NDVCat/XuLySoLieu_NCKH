@@ -1,8 +1,5 @@
-fastapi
-uvicorn
-joblib
+flask
 numpy
-pydantic
-scikit-learn
+scikit-learn==1.5.1
 gunicorn
-Flask
+pandas

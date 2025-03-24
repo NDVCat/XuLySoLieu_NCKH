@@ -15,25 +15,25 @@ if not os.path.exists(model_path):
 
 model = joblib.load(model_path)
 
-# Danh sách cột mong đợi (có thể thiếu)
+# Danh sách cột đã được dùng để huấn luyện mô hình
 expected_columns = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
                     'Press_WH', 'Oilrate', 'LiqRate', 'GasRate']
 
-# Chuyển đổi ngày từ số (Excel) sang định dạng YYYY-MM-DD
+# Hàm chuyển đổi ngày từ số (Excel) sang dạng datetime
 def convert_excel_date(excel_date):
     try:
         return (datetime.datetime(1899, 12, 30) + datetime.timedelta(days=int(excel_date))).strftime('%Y-%m-%d')
     except (ValueError, TypeError):
         return None
 
-# Chuyển đổi dữ liệu an toàn
+# Hàm chuyển đổi an toàn với giá trị mặc định
 def safe_convert(value, dtype, default):
     try:
         return dtype(value)
     except (ValueError, TypeError):
         return default
 
-# Hàm xử lý dữ liệu đầu vào từ Power Automate
+# Xử lý dữ liệu đầu vào từ Power Automate
 def preprocess_input(data):
     if isinstance(data, dict):  # Nếu là dictionary, chuyển thành DataFrame
         df = pd.DataFrame([data])
@@ -53,18 +53,16 @@ def preprocess_input(data):
     if 'DayOn' in df.columns:
         df['DayOn'] = df['DayOn'].apply(lambda x: safe_convert(x, int, 0))
 
-    # Xử lý các cột số, nếu thiếu sẽ điền giá trị mặc định
-    numeric_cols = ['Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
-                    'Press_WH', 'Oilrate', 'LiqRate', 'GasRate']
-    
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = df[col].apply(lambda x: safe_convert(x, float, 0.0))
-        else:
-            df[col] = 0.0  # Điền giá trị mặc định nếu thiếu
+    # Thêm các cột bị thiếu dựa vào danh sách expected_columns
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = 0.0  # Điền giá trị mặc định nếu cột bị thiếu
+
+    # Chuyển đổi tất cả các cột số về dạng float để tránh lỗi mô hình
+    for col in expected_columns:
+        df[col] = df[col].astype(float)
 
     print("✅ Dữ liệu sau khi xử lý:", df.to_dict(orient='records'))
-
     return df, None
 
 @app.route('/fill_missing_and_generate', methods=['POST'])
@@ -90,11 +88,10 @@ def fill_missing_and_generate():
             new_entry = last_row.copy()
             new_entry['DayOn'] += i
             if 'Date' in last_row and pd.notnull(last_row['Date']):
-                new_entry['Date'] = last_row['Date'] + relativedelta(months=i)
+                new_entry['Date'] = (last_row['Date'] + relativedelta(months=i)).strftime('%Y-%m-%d')
 
-            # Dự đoán với model (nếu có đủ feature)
-            feature_columns = [col for col in expected_columns if col in new_entry.index]
-            feature_array = new_entry[feature_columns].values.reshape(1, -1)
+            # Dự đoán với model (sử dụng đúng danh sách cột)
+            feature_array = np.array([new_entry[expected_columns].tolist()])  # Chuyển đổi sang array
             try:
                 new_entry['Qoil'] = model.predict(feature_array)[0]
                 print(f"🔮 Dự đoán {i}: Qoil = {new_entry['Qoil']}")
@@ -111,6 +108,11 @@ def fill_missing_and_generate():
                 new_entry['LiqRate'] += np.random.normal(0, 1)
 
             new_data.append(new_entry)
+
+        # Xử lý lỗi NaT trước khi trả về
+        for row in new_data:
+            if 'Date' in row and pd.isnull(row['Date']):
+                row['Date'] = None  # Chuyển NaT thành None để tránh lỗi JSON
 
         # Trả về JSON kết quả
         response = {

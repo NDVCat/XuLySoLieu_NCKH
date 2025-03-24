@@ -90,10 +90,10 @@ def fill_missing_and_generate():
             if 'Date' in last_row and pd.notnull(last_row['Date']):
                 new_entry['Date'] = (last_row['Date'] + relativedelta(months=i)).strftime('%Y-%m-%d')
 
-            # Dự đoán với model (sử dụng đúng danh sách cột)
-            feature_array = np.array([new_entry[expected_columns].tolist()])  # Chuyển đổi sang array
+            # Dự đoán với model (Fix lỗi "X does not have valid feature names")
+            feature_df = pd.DataFrame([new_entry[expected_columns]])  # Chuyển về DataFrame có tên cột
             try:
-                new_entry['Qoil'] = model.predict(feature_array)[0]
+                new_entry['Qoil'] = model.predict(feature_df)[0]
                 print(f"🔮 Dự đoán {i}: Qoil = {new_entry['Qoil']}")
             except Exception as e:
                 print(f"🚨 Lỗi dự đoán với model: {e}")
@@ -109,7 +109,7 @@ def fill_missing_and_generate():
 
             new_data.append(new_entry)
 
-        # Xử lý lỗi NaT trước khi trả về
+        # Fix lỗi "NaTType does not support timetuple"
         for row in new_data:
             if 'Date' in row and pd.isnull(row['Date']):
                 row['Date'] = None  # Chuyển NaT thành None để tránh lỗi JSON

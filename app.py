@@ -17,6 +17,14 @@ model = joblib.load(model_path)
 expected_columns = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
                     'Press_WH', 'Oilrate', 'LiqRate', 'GasRate', 'UniqueId', 'Date']
 
+# Hàm chuyển đổi Date từ Excel Serial Number sang YYYY-MM-DD
+def convert_excel_date(excel_date):
+    try:
+        excel_start = pd.Timestamp("1899-12-30")
+        return (excel_start + pd.to_timedelta(int(excel_date), unit="D")).strftime("%Y-%m-%d")
+    except:
+        return None
+
 # Hàm xử lý dữ liệu đầu vào
 def preprocess_input(data):
     if isinstance(data, dict):  # Nếu là dictionary, chuyển thành DataFrame
@@ -28,12 +36,19 @@ def preprocess_input(data):
 
     # Chỉnh sửa kiểu dữ liệu
     df['UniqueId'] = df['UniqueId'].astype(str)
-    df['Date'] = pd.to_datetime(df['Date'])
-    df['DayOn'] = df['DayOn'].astype(int)
 
+    # Chuyển đổi Date nếu nó là số
+    df['Date'] = df['Date'].apply(lambda x: convert_excel_date(x) if isinstance(x, (int, float)) else x)
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')  # Chuyển về dạng ngày tháng
+
+    # Ép kiểu DayOn thành số nguyên (int)
+    df['DayOn'] = pd.to_numeric(df['DayOn'], errors='coerce').fillna(0).astype(int)
+
+    # Kiểm tra cột 'Method' nếu có
     if 'Method' in df.columns:
         df['Method'] = df['Method'].astype(str)
 
+    # Chuyển các cột số về dạng float
     numeric_cols = ['Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
                     'Press_WH', 'Oilrate', 'LiqRate', 'GasRate']
     for col in numeric_cols:
@@ -48,10 +63,10 @@ def preprocess_input(data):
             # Dự đoán giá trị cho cột bị thiếu
             known_data = df.dropna()  # Các hàng có đủ dữ liệu để huấn luyện
             if not known_data.empty:
-                X_train = known_data.drop(columns=[col, 'UniqueId', 'Date'])  # Loại bỏ cột cần dự đoán, UniqueId & Date
+                X_train = known_data.drop(columns=[col, 'UniqueId', 'Date'])  # Loại bỏ cột cần dự đoán
                 y_train = known_data[col]
 
-                X_test = df_missing.drop(columns=[col, 'UniqueId', 'Date'])  # Loại bỏ cột cần dự đoán, UniqueId & Date
+                X_test = df_missing.drop(columns=[col, 'UniqueId', 'Date'])  # Loại bỏ cột cần dự đoán
 
                 if not X_train.empty and not X_test.empty:
                     model.fit(X_train, y_train)  # Huấn luyện lại mô hình trên tập dữ liệu đã có

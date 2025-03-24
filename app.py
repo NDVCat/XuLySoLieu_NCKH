@@ -3,11 +3,15 @@ import joblib
 import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
+import os
 
 app = Flask(__name__)
 
-# Load mô hình đã huấn luyện
-model = joblib.load('LinearRegression_model.pkl')
+model_path = 'LinearRegression_model.pkl'
+if not os.path.exists(model_path):
+    raise FileNotFoundError(f"Model file {model_path} not found!")
+
+model = joblib.load(model_path)
 
 # Danh sách cột mong đợi
 expected_columns = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
@@ -59,7 +63,14 @@ def preprocess_input(data):
 def fill_missing_and_generate():
     try:
         data = request.get_json()
-        
+        if not data:
+            return jsonify({'error': 'No data received'}), 400
+
+        # Kiểm tra xem các cột bắt buộc có tồn tại không
+        missing_cols = [col for col in expected_columns if col not in data]
+        if missing_cols:
+            return jsonify({'error': f'Missing required columns: {missing_cols}'}), 400
+
         # Xử lý dữ liệu đầu vào
         filled_data, error = preprocess_input(data)
         if error:
@@ -95,4 +106,5 @@ def fill_missing_and_generate():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 10000))  # Mặc định 10000 nếu không có PORT
+    app.run(host='0.0.0.0', port=port)

@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 import os
+import datetime
 
 app = Flask(__name__)
 
@@ -17,13 +18,19 @@ model = joblib.load(model_path)
 expected_columns = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
                     'Press_WH', 'Oilrate', 'LiqRate', 'GasRate', 'UniqueId', 'Date']
 
-# Hàm chuyển đổi Date từ Excel Serial Number sang YYYY-MM-DD
+# Chuyển đổi ngày từ số (Excel) sang định dạng YYYY-MM-DD
 def convert_excel_date(excel_date):
     try:
-        excel_start = pd.Timestamp("1899-12-30")
-        return (excel_start + pd.to_timedelta(int(excel_date), unit="D")).strftime("%Y-%m-%d")
-    except:
+        return (datetime.datetime(1899, 12, 30) + datetime.timedelta(days=int(excel_date))).strftime('%Y-%m-%d')
+    except (ValueError, TypeError):
         return None
+
+# Chuyển đổi dữ liệu an toàn
+def safe_convert(value, dtype, default):
+    try:
+        return dtype(value)
+    except (ValueError, TypeError):
+        return default
 
 # Hàm xử lý dữ liệu đầu vào
 def preprocess_input(data):
@@ -36,41 +43,23 @@ def preprocess_input(data):
 
     # Chỉnh sửa kiểu dữ liệu
     df['UniqueId'] = df['UniqueId'].astype(str)
-
-    # Chuyển đổi Date nếu nó là số
+    
+    # Xử lý Date (có thể là số từ Excel hoặc dạng chuỗi)
     df['Date'] = df['Date'].apply(lambda x: convert_excel_date(x) if isinstance(x, (int, float)) else x)
-    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')  # Chuyển về dạng ngày tháng
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
 
-    # Ép kiểu DayOn thành số nguyên (int)
-    df['DayOn'] = pd.to_numeric(df['DayOn'], errors='coerce').fillna(0).astype(int)
+    df['DayOn'] = df['DayOn'].apply(lambda x: safe_convert(x, int, 0))
 
-    # Kiểm tra cột 'Method' nếu có
-    if 'Method' in df.columns:
-        df['Method'] = df['Method'].astype(str)
-
-    # Chuyển các cột số về dạng float
     numeric_cols = ['Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
                     'Press_WH', 'Oilrate', 'LiqRate', 'GasRate']
     for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+        df[col] = df[col].apply(lambda x: safe_convert(x, float, 0.0))
 
-    # Điền giá trị thiếu bằng mô hình LinearRegression
+    # Điền giá trị thiếu bằng mô hình đã huấn luyện
     missing_cols = df.columns[df.isnull().any()].tolist()  # Các cột bị thiếu
     for col in missing_cols:
-        df_missing = df[df[col].isnull()]  # Các hàng bị thiếu giá trị
-
-        if not df_missing.empty:
-            # Dự đoán giá trị cho cột bị thiếu
-            known_data = df.dropna()  # Các hàng có đủ dữ liệu để huấn luyện
-            if not known_data.empty:
-                X_train = known_data.drop(columns=[col, 'UniqueId', 'Date'])  # Loại bỏ cột cần dự đoán
-                y_train = known_data[col]
-
-                X_test = df_missing.drop(columns=[col, 'UniqueId', 'Date'])  # Loại bỏ cột cần dự đoán
-
-                if not X_train.empty and not X_test.empty:
-                    model.fit(X_train, y_train)  # Huấn luyện lại mô hình trên tập dữ liệu đã có
-                    df.loc[df[col].isnull(), col] = model.predict(X_test)  # Điền giá trị thiếu
+        if col in numeric_cols:  # Chỉ xử lý cột số
+            df[col] = df[col].fillna(df[col].median())  # Điền giá trị trung vị
 
     return df, None
 
@@ -97,7 +86,7 @@ def fill_missing_and_generate():
         for i in range(1, 6):
             new_entry = last_row.copy()
             new_entry['DayOn'] += i
-            new_entry['Date'] = pd.to_datetime(last_row['Date']) + relativedelta(months=i)
+            new_entry['Date'] = last_row['Date'] + relativedelta(months=i)
 
             # Dự đoán với model
             feature_array = new_entry.drop(columns=['UniqueId', 'Date']).values.reshape(1, -1)

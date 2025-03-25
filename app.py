@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify
 import joblib
 import numpy as np
 import pandas as pd
-from dateutil.relativedelta import relativedelta
 import os
 import io
 
@@ -15,25 +14,28 @@ if not os.path.exists(MODEL_PATH):
 
 model = joblib.load(MODEL_PATH)
 
-# Danh sách cột đầu vào (cập nhật theo dữ liệu từ Power Automate)
-EXPECTED_COLUMNS = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 
-                    'ChokeSize', 'Press_WH', 'Oilrate', 'LiqRate']
+# Danh sách cột đầu vào (đã cập nhật theo model mới)
+EXPECTED_COLUMNS = ['Qgas', 'Qwater', 'Oilrate', 'LiqRate', 'DayOn']
 
 # Tiền xử lý dữ liệu đầu vào
 def preprocess_input(df):
-    if 'Date' in df.columns:
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-
-    if 'DayOn' in df.columns:
-        df['DayOn'] = df['DayOn'].fillna(0).astype(int)
-
-    # Đảm bảo đủ cột theo EXPECTED_COLUMNS
+    # Điền giá trị thiếu cho các cột số
+    for col in df.select_dtypes(include=['number']).columns:
+        if df[col].isnull().all():
+            df[col] = 0.0  # Nếu toàn bộ cột không có giá trị, điền 0
+        else:
+            df[col] = df[col].fillna(df[col].mean())  # Điền giá trị trung bình nếu có dữ liệu
+    
+    # Điền giá trị thiếu cho các cột object
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].fillna('Unknown')
+    
+    # Đảm bảo các cột EXPECTED_COLUMNS có trong dataframe
     for col in EXPECTED_COLUMNS:
         if col not in df.columns:
             df[col] = 0.0  
 
     df[EXPECTED_COLUMNS] = df[EXPECTED_COLUMNS].astype(float)
-
     return df
 
 @app.route('/upload', methods=['POST'])
@@ -59,36 +61,17 @@ def upload_file():
 
         df = preprocess_input(df)
 
-        # Kiểm tra có đủ cột không
-        missing_cols = [col for col in EXPECTED_COLUMNS if col not in df.columns]
-        if missing_cols:
-            return jsonify({"error": f"Missing columns: {missing_cols}"}), 400
-
         # Dự đoán dữ liệu mới
-        new_data = []
-        last_row = df.iloc[0]
-        for i in range(1, 6):
-            new_entry = last_row.copy()
-            new_entry['DayOn'] += i
-            if 'Date' in last_row and pd.notnull(last_row['Date']):
-                new_entry['Date'] = (last_row['Date'] + relativedelta(months=i)).strftime('%Y-%m-%d')
-            
-            try:
-                feature_df = pd.DataFrame([new_entry[EXPECTED_COLUMNS]])  
-                print("Feature DataFrame for Model:\n", feature_df)  # Debug log
-                new_entry['Qoil'] = model.predict(feature_df)[0]
-            except Exception as e:
-                return jsonify({'error': f'Model prediction error: {str(e)}'}), 500
-
-            # Thêm nhiễu ngẫu nhiên
-            new_entry['GOR'] += np.random.normal(0, 5)
-            new_entry['Press_WH'] += np.random.normal(0, 2)
-            new_entry['LiqRate'] += np.random.normal(0, 1)
-
-            new_data.append(new_entry)
+        try:
+            feature_df = df[EXPECTED_COLUMNS]  
+            print("Feature DataFrame for Model:\n", feature_df.head())  # Debug log
+            predictions = model.predict(feature_df)
+            df['Predicted_Qoil'] = predictions
+        except Exception as e:
+            return jsonify({'error': f'Model prediction error: {str(e)}'}), 500
 
         # Chuyển đổi dữ liệu sang CSV string
-        output_csv = pd.DataFrame(new_data).to_csv(index=False)
+        output_csv = df.to_csv(index=False)
         
         response = {
             'message': 'CSV processed successfully',

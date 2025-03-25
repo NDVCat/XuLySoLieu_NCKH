@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 import os
-import datetime
 import requests
 
 app = Flask(__name__)
@@ -23,21 +22,6 @@ EXPECTED_COLUMNS = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize',
 # Thư mục lưu file tải về từ SharePoint
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# Hàm lấy danh sách file từ thư mục SharePoint
-def get_files_from_sharepoint(folder_url):
-    try:
-        sharepoint_api_url = folder_url + "/_api/web/GetFolderByServerRelativeUrl('Shared Documents')/Files"
-        headers = {"Accept": "application/json;odata=verbose"}
-        
-        response = requests.get(sharepoint_api_url, headers=headers)
-        if response.status_code != 200:
-            return None, f"Failed to access SharePoint folder: {response.text}"
-
-        files = response.json()['d']['results']
-        return files, None
-    except Exception as e:
-        return None, str(e)
 
 # Hàm tải file từ SharePoint
 def download_file_from_sharepoint(file_url, save_path):
@@ -86,27 +70,16 @@ def preprocess_input(df):
 def upload_file():
     try:
         data = request.get_json()
-        folder_url = data.get("folder_url", "")
+        file_path = data.get("file_path")
 
-        if not folder_url:
-            return jsonify({"error": "No SharePoint folder URL provided"}), 400
+        if not file_path:
+            return jsonify({"error": "Missing 'file_path' parameter"}), 400
 
-        # Lấy danh sách file từ SharePoint
-        files, error = get_files_from_sharepoint(folder_url)
-        if error:
-            return jsonify({"error": error}), 400
-
-        # Chọn file mới nhất hoặc file phù hợp
-        if not files:
-            return jsonify({"error": "No files found in the SharePoint folder"}), 400
-
-        latest_file = max(files, key=lambda x: x['TimeCreated'])
-        file_url = latest_file['ServerRelativeUrl']
-        file_name = latest_file['Name']
-
-        # Tải file về
+        file_name = os.path.basename(file_path)
         local_file_path = os.path.join(UPLOAD_FOLDER, file_name)
-        downloaded_path, error = download_file_from_sharepoint(file_url, local_file_path)
+
+        # Tải file từ SharePoint
+        downloaded_path, error = download_file_from_sharepoint(file_path, local_file_path)
         if error:
             return jsonify({"error": error}), 400
 

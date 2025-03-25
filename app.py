@@ -42,13 +42,27 @@ def upload_file():
         if not request.data:
             return jsonify({"error": "No CSV data provided"}), 400
         
-        csv_data = request.data.decode('utf-8')  # Đọc dữ liệu từ request body
+        csv_data = request.data.decode('utf-8')  
         print("Received CSV Data:\n", csv_data)  # Debug log
 
-        df = pd.read_csv(io.StringIO(csv_data))
+        # Kiểm tra dữ liệu có phải CSV hợp lệ không
+        if not csv_data.strip():
+            return jsonify({"error": "Empty CSV data received"}), 400
+
+        # Thử đọc CSV để kiểm tra lỗi
+        try:
+            df = pd.read_csv(io.StringIO(csv_data))
+        except Exception as e:
+            return jsonify({"error": f"CSV Parsing Error: {str(e)}"}), 400
+        
         print("Parsed DataFrame:\n", df.head())  # Kiểm tra dataframe sau khi đọc
 
         df = preprocess_input(df)
+
+        # Kiểm tra có đủ cột không
+        missing_cols = [col for col in EXPECTED_COLUMNS if col not in df.columns]
+        if missing_cols:
+            return jsonify({"error": f"Missing columns: {missing_cols}"}), 400
 
         # Dự đoán dữ liệu mới
         new_data = []

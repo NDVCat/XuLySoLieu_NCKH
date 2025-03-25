@@ -5,7 +5,7 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 import os
 import datetime
-import base64
+import requests
 
 app = Flask(__name__)
 
@@ -20,56 +20,55 @@ model = joblib.load(MODEL_PATH)
 EXPECTED_COLUMNS = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
                     'Press_WH', 'Oilrate', 'LiqRate', 'GasRate']
 
-# Thư mục lưu file upload
+# Thư mục lưu file tải về từ SharePoint
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Hàm chuyển đổi ngày từ số (Excel) sang datetime
-def convert_excel_date(excel_date):
+# Hàm lấy danh sách file từ thư mục SharePoint
+def get_files_from_sharepoint(folder_url):
     try:
-        return (datetime.datetime(1899, 12, 30) + datetime.timedelta(days=int(excel_date))).strftime('%Y-%m-%d')
-    except (ValueError, TypeError):
-        return None
+        sharepoint_api_url = folder_url + "/_api/web/GetFolderByServerRelativeUrl('Shared Documents')/Files"
+        headers = {"Accept": "application/json;odata=verbose"}
+        
+        response = requests.get(sharepoint_api_url, headers=headers)
+        if response.status_code != 200:
+            return None, f"Failed to access SharePoint folder: {response.text}"
 
-# Xử lý file từ Base64 hoặc từ đường dẫn
-def process_uploaded_file(filename=None, filecontent=None, filepath=None):
+        files = response.json()['d']['results']
+        return files, None
+    except Exception as e:
+        return None, str(e)
+
+# Hàm tải file từ SharePoint
+def download_file_from_sharepoint(file_url, save_path):
     try:
-        if filepath:
-            if not os.path.exists(filepath):
-                return None, f"File path does not exist: {filepath}"
+        response = requests.get(file_url)
+        if response.status_code == 200:
+            with open(save_path, "wb") as f:
+                f.write(response.content)
+            return save_path, None
+        else:
+            return None, f"Failed to download file: {response.text}"
+    except Exception as e:
+        return None, str(e)
 
-            if filepath.endswith(".csv"):
-                df = pd.read_csv(filepath)
-            elif filepath.endswith((".xls", ".xlsx")):
-                df = pd.read_excel(filepath)
-            else:
-                return None, "Unsupported file format"
-            
-            return df, None
-
-        if filename and filecontent:
-            file_bytes = base64.b64decode(filecontent)
-            file_path = os.path.join(UPLOAD_FOLDER, filename)
-            with open(file_path, "wb") as f:
-                f.write(file_bytes)
-
-            if filename.endswith(".csv"):
-                df = pd.read_csv(file_path)
-            elif filename.endswith((".xls", ".xlsx")):
-                df = pd.read_excel(file_path)
-            else:
-                return None, "Unsupported file format"
-
-            return df, None
-
-        return None, "No file provided"
+# Hàm xử lý file
+def process_file(file_path):
+    try:
+        if file_path.endswith(".csv"):
+            df = pd.read_csv(file_path)
+        elif file_path.endswith((".xls", ".xlsx")):
+            df = pd.read_excel(file_path)
+        else:
+            return None, "Unsupported file format"
+        
+        return df, None
     except Exception as e:
         return None, str(e)
 
 # Tiền xử lý dữ liệu đầu vào
 def preprocess_input(df):
     if 'Date' in df.columns:
-        df['Date'] = df['Date'].apply(lambda x: convert_excel_date(x) if isinstance(x, (int, float)) else x)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
 
     if 'DayOn' in df.columns:
@@ -87,15 +86,32 @@ def preprocess_input(df):
 def upload_file():
     try:
         data = request.get_json()
-        filename = data.get("filename", "")
-        filecontent = data.get("filecontent", "")
-        filepath = data.get("filepath", "")
+        folder_url = data.get("folder_url", "")
 
-        if not (filepath or filecontent):
-            return jsonify({"error": "No file path or content provided"}), 400
+        if not folder_url:
+            return jsonify({"error": "No SharePoint folder URL provided"}), 400
 
-        # Xử lý file từ đường dẫn hoặc Base64
-        df, error = process_uploaded_file(filename, filecontent, filepath)
+        # Lấy danh sách file từ SharePoint
+        files, error = get_files_from_sharepoint(folder_url)
+        if error:
+            return jsonify({"error": error}), 400
+
+        # Chọn file mới nhất hoặc file phù hợp
+        if not files:
+            return jsonify({"error": "No files found in the SharePoint folder"}), 400
+
+        latest_file = max(files, key=lambda x: x['TimeCreated'])
+        file_url = latest_file['ServerRelativeUrl']
+        file_name = latest_file['Name']
+
+        # Tải file về
+        local_file_path = os.path.join(UPLOAD_FOLDER, file_name)
+        downloaded_path, error = download_file_from_sharepoint(file_url, local_file_path)
+        if error:
+            return jsonify({"error": error}), 400
+
+        # Xử lý file
+        df, error = process_file(downloaded_path)
         if error:
             return jsonify({"error": error}), 400
 
@@ -137,6 +153,7 @@ def upload_file():
 
         response = {
             'message': 'File processed successfully',
+            'file_name': file_name,
             'filled_data': filled_data.to_dict(orient='records'),
             'generated_data': pd.DataFrame(new_data).to_dict(orient='records'),
             'output_file': output_file  # Đường dẫn để tải file CSV từ Power Automate

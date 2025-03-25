@@ -15,9 +15,9 @@ if not os.path.exists(MODEL_PATH):
 
 model = joblib.load(MODEL_PATH)
 
-# Danh sách cột đầu vào của mô hình
-EXPECTED_COLUMNS = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
-                    'Press_WH', 'Oilrate', 'LiqRate', 'GasRate']
+# Danh sách cột đầu vào (cập nhật theo dữ liệu từ Power Automate)
+EXPECTED_COLUMNS = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 
+                    'ChokeSize', 'Press_WH', 'Oilrate', 'LiqRate']
 
 # Tiền xử lý dữ liệu đầu vào
 def preprocess_input(df):
@@ -25,8 +25,9 @@ def preprocess_input(df):
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
 
     if 'DayOn' in df.columns:
-        df['DayOn'] = df['DayOn'].astype(int)
+        df['DayOn'] = df['DayOn'].fillna(0).astype(int)
 
+    # Đảm bảo đủ cột theo EXPECTED_COLUMNS
     for col in EXPECTED_COLUMNS:
         if col not in df.columns:
             df[col] = 0.0  
@@ -42,9 +43,13 @@ def upload_file():
             return jsonify({"error": "No CSV data provided"}), 400
         
         csv_data = request.data.decode('utf-8')  # Đọc dữ liệu từ request body
+        print("Received CSV Data:\n", csv_data)  # Debug log
+
         df = pd.read_csv(io.StringIO(csv_data))
+        print("Parsed DataFrame:\n", df.head())  # Kiểm tra dataframe sau khi đọc
+
         df = preprocess_input(df)
-        
+
         # Dự đoán dữ liệu mới
         new_data = []
         last_row = df.iloc[0]
@@ -56,6 +61,7 @@ def upload_file():
             
             try:
                 feature_df = pd.DataFrame([new_entry[EXPECTED_COLUMNS]])  
+                print("Feature DataFrame for Model:\n", feature_df)  # Debug log
                 new_entry['Qoil'] = model.predict(feature_df)[0]
             except Exception as e:
                 return jsonify({'error': f'Model prediction error: {str(e)}'}), 500

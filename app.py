@@ -31,26 +31,38 @@ def convert_excel_date(excel_date):
     except (ValueError, TypeError):
         return None
 
-# Xử lý file upload từ Base64
-def process_uploaded_base64(filename, filecontent):
+# Xử lý file từ Base64 hoặc từ đường dẫn
+def process_uploaded_file(filename=None, filecontent=None, filepath=None):
     try:
-        # Giải mã file từ Base64
-        file_bytes = base64.b64decode(filecontent)
+        if filepath:
+            if not os.path.exists(filepath):
+                return None, f"File path does not exist: {filepath}"
 
-        # Lưu file
-        file_path = os.path.join(UPLOAD_FOLDER, filename)
-        with open(file_path, "wb") as f:
-            f.write(file_bytes)
+            if filepath.endswith(".csv"):
+                df = pd.read_csv(filepath)
+            elif filepath.endswith((".xls", ".xlsx")):
+                df = pd.read_excel(filepath)
+            else:
+                return None, "Unsupported file format"
+            
+            return df, None
 
-        # Đọc file vào DataFrame
-        if filename.endswith(".csv"):
-            df = pd.read_csv(file_path)
-        elif filename.endswith((".xls", ".xlsx")):
-            df = pd.read_excel(file_path)
-        else:
-            return None, "Unsupported file format"
+        if filename and filecontent:
+            file_bytes = base64.b64decode(filecontent)
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            with open(file_path, "wb") as f:
+                f.write(file_bytes)
 
-        return df, None
+            if filename.endswith(".csv"):
+                df = pd.read_csv(file_path)
+            elif filename.endswith((".xls", ".xlsx")):
+                df = pd.read_excel(file_path)
+            else:
+                return None, "Unsupported file format"
+
+            return df, None
+
+        return None, "No file provided"
     except Exception as e:
         return None, str(e)
 
@@ -75,14 +87,15 @@ def preprocess_input(df):
 def upload_file():
     try:
         data = request.get_json()
-        filename = data.get("filename", "uploaded_file.csv")
+        filename = data.get("filename", "")
         filecontent = data.get("filecontent", "")
+        filepath = data.get("filepath", "")
 
-        if not filecontent:
-            return jsonify({"error": "No file content provided"}), 400
+        if not (filepath or filecontent):
+            return jsonify({"error": "No file path or content provided"}), 400
 
-        # Xử lý file Base64
-        df, error = process_uploaded_base64(filename, filecontent)
+        # Xử lý file từ đường dẫn hoặc Base64
+        df, error = process_uploaded_file(filename, filecontent, filepath)
         if error:
             return jsonify({"error": error}), 400
 

@@ -38,10 +38,10 @@ def preprocess_input(df):
 @app.route('/upload', methods=['POST'])
 def upload_file():
     try:
-        if 'csv_data' not in request.form:
+        if not request.data:
             return jsonify({"error": "No CSV data provided"}), 400
         
-        csv_data = request.form['csv_data']
+        csv_data = request.data.decode('utf-8')  # Đọc dữ liệu từ request body
         df = pd.read_csv(io.StringIO(csv_data))
         df = preprocess_input(df)
         

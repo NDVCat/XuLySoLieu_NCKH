@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 import os
+import io
 
 app = Flask(__name__)
 
@@ -17,10 +18,6 @@ model = joblib.load(MODEL_PATH)
 # Danh sách cột đầu vào của mô hình
 EXPECTED_COLUMNS = ['DayOn', 'Qoil', 'Qgas', 'Qwater', 'GOR', 'ChokeSize', 
                     'Press_WH', 'Oilrate', 'LiqRate', 'GasRate']
-
-# Thư mục lưu file tải lên
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Tiền xử lý dữ liệu đầu vào
 def preprocess_input(df):
@@ -41,18 +38,11 @@ def preprocess_input(df):
 @app.route('/upload', methods=['POST'])
 def upload_file():
     try:
-        if 'file' not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
+        if 'csv_data' not in request.form:
+            return jsonify({"error": "No CSV data provided"}), 400
         
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({"error": "No selected file"}), 400
-
-        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
-        file.save(file_path)
-        
-        # Xử lý file CSV
-        df = pd.read_csv(file_path)
+        csv_data = request.form['csv_data']
+        df = pd.read_csv(io.StringIO(csv_data))
         df = preprocess_input(df)
         
         # Dự đoán dữ liệu mới
@@ -77,15 +67,12 @@ def upload_file():
 
             new_data.append(new_entry)
 
-        # Xuất file CSV kết quả
-        output_file = os.path.join(UPLOAD_FOLDER, "predicted_data.csv")
-        pd.DataFrame(new_data).to_csv(output_file, index=False)
-
+        # Chuyển đổi dữ liệu sang CSV string
+        output_csv = pd.DataFrame(new_data).to_csv(index=False)
+        
         response = {
-            'message': 'File processed successfully',
-            'file_name': file.filename,
-            'generated_data': pd.DataFrame(new_data).to_dict(orient='records'),
-            'output_file': output_file  # Đường dẫn để tải file CSV từ Power Automate
+            'message': 'CSV processed successfully',
+            'generated_csv': output_csv  # Trả về CSV dạng chuỗi để Power Automate sử dụng
         }
 
         return jsonify(response)

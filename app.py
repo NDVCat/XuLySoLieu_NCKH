@@ -53,7 +53,7 @@ def upload_file():
 
         # Thử đọc CSV để kiểm tra lỗi
         try:
-            df = pd.read_csv(io.StringIO(csv_data))
+            df = pd.read_csv(io.StringIO(csv_data), encoding='utf-8-sig', skip_blank_lines=True)
         except Exception as e:
             return jsonify({"error": f"CSV Parsing Error: {str(e)}"}), 400
         

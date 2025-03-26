@@ -42,8 +42,13 @@ def upload_file():
         if not request.data:
             return jsonify({"error": "No CSV data provided"}), 400
 
-        # Đọc dữ liệu từ Power Automate, có thể chứa ký tự '\n'
+        # Đọc dữ liệu từ request
         csv_data = request.data.decode('utf-8').strip()
+        
+        # Kiểm tra nếu dữ liệu có chứa `/n` thay vì `\n`
+        if "/n" in csv_data:
+            csv_data = csv_data.replace("/n", "\n")  # Chuyển thành xuống dòng thực sự
+
         print("Received CSV Data:\n", csv_data)  # Debug log
 
         # Kiểm tra nếu dữ liệu trống
@@ -53,8 +58,10 @@ def upload_file():
         # Thử đọc CSV từ chuỗi dữ liệu
         try:
             df = pd.read_csv(io.StringIO(csv_data), encoding='utf-8-sig', skip_blank_lines=True)
-        except Exception as e:
+        except pd.errors.ParserError as e:
             return jsonify({"error": f"CSV Parsing Error: {str(e)}"}), 400
+        except Exception as e:
+            return jsonify({"error": f"Unexpected CSV Error: {str(e)}"}), 400
 
         print("Parsed DataFrame:\n", df.head())  # Debug log
 

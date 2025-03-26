@@ -14,20 +14,23 @@ if not os.path.exists(MODEL_PATH):
 
 model = joblib.load(MODEL_PATH)
 
-# Danh sách cột đầu vào
+# Danh sách cột đầu vào (đã cập nhật theo model mới)
 EXPECTED_COLUMNS = ['Qgas', 'Qwater', 'Oilrate', 'LiqRate', 'DayOn']
 
 # Tiền xử lý dữ liệu đầu vào
 def preprocess_input(df):
+    # Điền giá trị thiếu cho các cột số
     for col in df.select_dtypes(include=['number']).columns:
         if df[col].isnull().all():
             df[col] = 0.0  # Nếu toàn bộ cột không có giá trị, điền 0
         else:
             df[col] = df[col].fillna(df[col].mean())  # Điền giá trị trung bình nếu có dữ liệu
     
+    # Điền giá trị thiếu cho các cột object
     for col in df.select_dtypes(include=['object']).columns:
         df[col] = df[col].fillna('Unknown')
-
+    
+    # Đảm bảo các cột EXPECTED_COLUMNS có trong dataframe
     for col in EXPECTED_COLUMNS:
         if col not in df.columns:
             df[col] = 0.0  
@@ -38,57 +41,45 @@ def preprocess_input(df):
 @app.route('/upload', methods=['POST'])
 def upload_file():
     try:
-        # Kiểm tra nếu dữ liệu không có
         if not request.data:
             return jsonify({"error": "No CSV data provided"}), 400
-
-        # Đọc dữ liệu từ request
-        csv_data = request.data.decode('utf-8').strip()
         
-        # Kiểm tra nếu dữ liệu có chứa `/n` thay vì `\n`
-        if "/n" in csv_data:
-            csv_data = csv_data.replace("/n", "\n")  # Chuyển thành xuống dòng thực sự
-
+        csv_data = request.data.decode('utf-8')  
         print("Received CSV Data:\n", csv_data)  # Debug log
 
-        # Kiểm tra nếu dữ liệu trống
-        if not csv_data:
+        # Kiểm tra dữ liệu có phải CSV hợp lệ không
+        if not csv_data.strip():
             return jsonify({"error": "Empty CSV data received"}), 400
 
-        # Thử đọc CSV từ chuỗi dữ liệu
+        # Thử đọc CSV để kiểm tra lỗi
         try:
             df = pd.read_csv(io.StringIO(csv_data), encoding='utf-8-sig', skip_blank_lines=True)
-        except pd.errors.ParserError as e:
-            return jsonify({"error": f"CSV Parsing Error: {str(e)}"}), 400
         except Exception as e:
-            return jsonify({"error": f"Unexpected CSV Error: {str(e)}"}), 400
+            return jsonify({"error": f"CSV Parsing Error: {str(e)}"}), 400
+        
+        print("Parsed DataFrame:\n", df.head())  # Kiểm tra dataframe sau khi đọc
 
-        print("Parsed DataFrame:\n", df.head())  # Debug log
-
-        # Tiền xử lý dữ liệu
         df = preprocess_input(df)
-
-        # Kiểm tra xem có đủ cột không
-        missing_columns = [col for col in EXPECTED_COLUMNS if col not in df.columns]
-        if missing_columns:
-            return jsonify({"error": f"Missing columns in input: {missing_columns}"}), 400
 
         # Dự đoán dữ liệu mới
         try:
-            feature_df = df[EXPECTED_COLUMNS]
+            feature_df = df[EXPECTED_COLUMNS]  
+            print("Feature DataFrame for Model:\n", feature_df.head())  # Debug log
             predictions = model.predict(feature_df)
             df['Predicted_Qoil'] = predictions
         except Exception as e:
             return jsonify({'error': f'Model prediction error: {str(e)}'}), 500
 
-        # Trả về kết quả dưới dạng JSON (dễ sử dụng hơn so với CSV string)
-        response_data = df.to_dict(orient='records')
-
-        return jsonify({
+        # Chuyển đổi dữ liệu sang CSV string
+        output_csv = df.to_csv(index=False)
+        
+        response = {
             'message': 'CSV processed successfully',
-            'predictions': response_data
-        })
+            'generated_csv': output_csv  # Trả về CSV dạng chuỗi để Power Automate sử dụng
+        }
 
+        return jsonify(response)
+    
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

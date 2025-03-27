@@ -72,10 +72,9 @@ def upload_file():
 
         # Chuyển đổi dữ liệu sang CSV string
         output_csv = df.to_csv(index=False)
-        
         response = {
             'message': 'CSV processed successfully',
-            'generated_csv': output_csv  # Trả về CSV dạng chuỗi để Power Automate sử dụng
+            'predictions': df.to_dict(orient='records')  # Trả về danh sách JSON 
         }
 
         return jsonify(response)
